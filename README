@@ -1,0 +1,7 @@
+Grab leprosorium.ru user karma
+-------------------------------
+
+- Get lepro.sid and lepro.uid cookies from logged-in session and put them into ~/.leper/auth_cookie:
+  echo "lepro.sid=XXX; lepro.uid=999" > ~/.leper/auth_cookie
+- Call grab_karma user1 user2
+- See grab_karma --help for more options
