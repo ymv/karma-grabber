@@ -8,6 +8,7 @@ import time
 import re
 import httplib
 import json
+import lxml.html
 
 def load_cookie(path=None):
     paths = [path] if path is not None else [os.path.expanduser('~/.leper/auth_cookie'), './auth_cookie']
@@ -84,7 +85,8 @@ class Grabber(object):
 
     def grab(self, user):
         data = self._load('/users/'+user)
-        return self._parse(data)
+        tree = lxml.html.document_fromstring(data)
+        return self._parse(tree)
 
     def _load(self, url):
         self._con.request('GET', url, headers=self._headers)
@@ -98,15 +100,16 @@ class Grabber(object):
             raise Exception("Bad http code: %d %s" % (response.status, response.reason))
         return data
 
-    def _parse(self, data):
+    def _parse(self, tree):
+        rating_match = re.search(u'([-\d]+).+?([-\d]+).+?([-\d]+)', tree.cssselect('.userrating')[0].text_content())
         return {
-            'comment_karma': extract('Их общий рейтинг ([-\d]+)\.', data),
-            'karma': extract('<em>([-\d]+)</em></span>', data),
+            'karma': int(tree.cssselect('.uservoteholder span em')[0].text),
+            'comment_karma': int(rating_match.group(3)),
+            'post_count': int(rating_match.group(1)),
+            'comment_count': int(rating_match.group(2)),
+            'parent': tree.cssselect('.userparent a')[0].text,
+            'kids': [e.text for e in tree.cssselect('.userchildren a')],
         }
-
-def extract(e, s):
-    match = re.search(e, s)
-    return int(match.group(1)) if match else None
 
 if __name__ == '__main__':
     main()
