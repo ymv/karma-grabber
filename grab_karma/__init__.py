@@ -9,6 +9,7 @@ import re
 import httplib
 import json
 import lxml.html
+import urllib
 
 def load_cookie(path=None):
     paths = [path] if path is not None else [os.path.expanduser('~/.leper/auth_cookie'), './auth_cookie']
@@ -38,15 +39,13 @@ def main():
     dumper.start()
     for user in args.users:
         try:
-            data = grabber.grab(user)
-            if dumper.voters:
-                data['voters'] = grabber.grab_voters(data['id'])
+            data = grabber.grab(user, dumper.voters)
         except NotFoundError:
             dumper.not_found(user)
         except AuthError:
             die('Redirected. Cookie might be wrong or outdated')
-        except Exception as e:
-            die('Error: %s', e)
+        #except Exception as e:
+        #    die('Error: %s', e)
         else:
             dumper.found(user, data)
     dumper.end()
@@ -81,22 +80,39 @@ class NotFoundError(Exception): pass
 
 class Grabber(object):
     def __init__(self, cookie):
-        self._con = httplib.HTTPConnection('leprosorium.ru')
+        self._con = httplib.HTTPSConnection('leprosorium.ru')
         self._headers = {
             'Cookie': cookie,
             'User-Agent': 'Karmagrabber',
             'Connection': 'keep-alive',
         }
 
-    def grab(self, user):
+    def grab(self, user, voters):
         data = self._load('/users/'+user, None)
         tree = lxml.html.document_fromstring(data)
-        return self._parse(tree)
+        r = self._parse(tree)
+        if voters:
+            scripts = tree.xpath('//script/text()')
+            for s in scripts:
+                csrf_match = re.search(ur"csrf_token\s*:\s*'([^']+)'", s)
+                if csrf_match:
+                    csrf = csrf_match.group(1)
+                    break
+            else:
+                raise Exception('CSRF token not found')
+            r['voters'] = self._grab_voters(r['id'], csrf)
+        return r
 
-    def grab_voters(self, user_id):
-        data = self._load('/karmactl', 'view=%s' % user_id)
+    def _grab_voters(self, user_id, csrf):
+        q = {
+            'limit': '100500',
+            'offset': '0',
+            'csrf_token': csrf,
+            'user': str(user_id)
+        }
+        data = self._load('/ajax/user/karma/list/', urllib.urlencode(q))
         obj = json.loads(data)
-        return {x['login']: int(x['attitude']) for x in obj['votes']}
+        return {x['user']['login']: int(x['vote'])*sign for sign, f in [(1, 'pros'), (-1, 'cons')] for x in (obj[f] or [])}
 
     def _load(self, url, data):
         if data is None:
@@ -116,15 +132,17 @@ class Grabber(object):
         return data
 
     def _parse(self, tree):
-        rating_match = re.search(u'([-\d]+).+?([-\d]+).+?([-\d]+)', tree.cssselect('.userrating')[0].text_content())
+        rating_match = re.search(u'([-\d]+).+?([-\d]+).+?([-\d]+)', tree.cssselect('.b-user_stat')[0].text_content(), re.DOTALL)
+        id_match = re.search(u'#([.\d]+)', tree.xpath('.//td[@class="b-table-cell"][h2]')[0].text_content())
+        parents = tree.cssselect('.b-user_parent a')
         return {
-            'id': int(tree.cssselect('#uservote .vote')[0].get('uid')),
-            'karma': int(tree.cssselect('.uservoteholder span em')[0].text),
+            'id': int(id_match.group(1).replace('.','')),
+            'karma': int(tree.cssselect('#js-karma')[0].text),
             'comment_karma': int(rating_match.group(3)),
             'post_count': int(rating_match.group(1)),
             'comment_count': int(rating_match.group(2)),
-            'parent': tree.cssselect('.userparent a')[0].text,
-            'kids': [e.text for e in tree.cssselect('.userchildren a')],
+            'parent': parents[0].text if parents else None,
+            'kids': [e.text for e in tree.cssselect('.b-user_children a')],
         }
 
 if __name__ == '__main__':
