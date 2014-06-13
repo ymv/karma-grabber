@@ -3,7 +3,7 @@ setup(
     name = "Karma grabber",
     version = "0.0.1",
     packages = ['grab_karma'],
-    install_requires=['lxml'],
+    install_requires=['lxml', 'cssselect'],
     entry_points={
         'console_scripts': ['grab_karma = grab_karma:main']
     }
